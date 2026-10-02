@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>분류 학습 시뮬레이터</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Pretendard:wght@400;500;600;700&display=swap');
+        body {
+            font-family: 'Pretendard', sans-serif;
+            background-color: #f1f5f9; /* slate-100 */
+            -webkit-tap-highlight-color: transparent;
+        }
+        
+        /* 캔버스 상호작용을 위한 터치 제어 */
+        #graph-canvas {
+            touch-action: none; 
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        /* 도구 버튼 활성화 상태 트랜지션 */
+        .tool-btn {
+            transition: all 0.2s ease;
+        }
+        .tool-btn.active-red {
+            background-color: #fef2f2;
+            border-color: #ef4444;
+            color: #b91c1c;
+            box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.2);
+        }
+        .tool-btn.active-blue {
+            background-color: #eff6ff;
+            border-color: #3b82f6;
+            color: #1d4ed8;
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+        }
+    </style>
+</head>
+<body class="text-slate-800 pb-10">
+
+    <header class="bg-white shadow-sm p-4 sticky top-0 z-50">
+        <div class="max-w-4xl mx-auto flex justify-between items-center">
+            <div>
+                <h1 class="text-xl md:text-2xl font-bold text-slate-800">분류 모델 시뮬레이터</h1>
+                <p class="text-xs md:text-sm text-slate-500 mt-1">로지스틱 회귀(Logistic Regression)와 결정 경계</p>
+            </div>
+            <button id="reset-btn" class="bg-slate-100 text-slate-600 hover:bg-slate-200 px-4 py-2 rounded-lg font-semibold transition-colors shadow-sm text-sm">
+                초기화
+            </button>
+        </div>
+    </header>
+
+    <main class="max-w-4xl mx-auto p-4 flex flex-col gap-6 mt-2">
+        
+        <section id="tips-section" class="bg-indigo-50 border border-indigo-100 rounded-2xl p-5 md:p-6 shadow-sm">
+            <h2 class="text-lg font-bold text-indigo-900 mb-3 flex items-center gap-2">
+                <span>💡</span> 시뮬레이터 실습 팁
+            </h2>
+            <ul class="list-disc list-inside text-indigo-800 space-y-2 text-sm md:text-base leading-relaxed">
+                <li><strong class="text-indigo-900">데이터 입력:</strong> 아래 '실습 탭'에서 그룹 A(빨강) 또는 그룹 B(파랑)를 선택하고 빈 캔버스를 터치하여 데이터를 생성하세요.</li>
+                <li><strong class="text-indigo-900">결정 경계 관찰:</strong> 서로 다른 두 그룹의 데이터가 모이면, 컴퓨터가 두 그룹을 나누는 <span class="bg-indigo-200 px-1 rounded">최적의 선(결정 경계)</span>을 스스로 학습해 그려냅니다.</li>
+                <li><strong class="text-indigo-900">방정식의 변화:</strong> 데이터를 추가할 때마다 화면 하단의 수식(w_1x + w_2y + b = 0)이 실시간으로 변하는 것을 확인해보세요.</li>
+                <li><strong class="text-indigo-900">오분류(예외) 실험:</strong> 빨간색 영역 깊숙한 곳에 파란색 점을 찍어보세요. 예외 데이터가 경계선에 어떤 영향을 주는지 관찰할 수 있습니다.</li>
+            </ul>
+        </section>
+
+        <section id="interactive-tab" class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
+            
+            <div class="p-4 border-b border-slate-100 bg-slate-50 flex items-center gap-2">
+                <h2 class="text-lg font-bold text-slate-700">⚙️ 실습 탭</h2>
+                <span id="data-count" class="ml-auto text-sm font-semibold text-slate-500 bg-white px-2 py-1 rounded border border-slate-200">데이터: 0개</span>
+            </div>
+
+            <!-- 툴 선택 버튼 -->
+            <div class="flex gap-3 p-4">
+                <button id="tool-red" class="tool-btn active-red flex-1 bg-white border border-slate-200 rounded-xl p-3 flex flex-col items-center justify-center gap-2 shadow-sm font-bold text-sm md:text-base cursor-pointer">
+                    <span class="w-5 h-5 rounded-full bg-red-500 inline-block shadow-sm"></span>
+                    <span>그룹 A (빨강 원)</span>
+                </button>
+                <button id="tool-blue" class="tool-btn flex-1 bg-white border border-slate-200 rounded-xl p-3 flex flex-col items-center justify-center gap-2 shadow-sm font-bold text-slate-600 text-sm md:text-base cursor-pointer">
+                    <span class="w-5 h-5 bg-blue-500 inline-block shadow-sm"></span>
+                    <span>그룹 B (파랑 네모)</span>
+                </button>
+            </div>
+
+            <!-- 캔버스 컨테이너 -->
+            <div class="relative w-full aspect-square md:aspect-video bg-white border-y border-slate-100">
+                <canvas id="graph-canvas" class="absolute top-0 left-0 w-full h-full cursor-crosshair"></canvas>
+            </div>
+
+            <!-- 수식 표시 영역 -->
+            <div class="p-4 bg-slate-50 border-t border-slate-100">
+                <div class="text-xs md:text-sm text-slate-500 font-medium mb-1">실시간 결정 경계 방정식:</div>
+                <div id="equation-display" class="font-mono text-base md:text-lg text-slate-400 bg-white p-3 rounded-lg border border-slate-200 shadow-inner text-center">
+                    데이터를 2개 이상 입력해주세요.
+                </div>
+            </div>
+
+        </section>
+    </main>
+
+    <script>
+        const canvas = document.getElementById('graph-canvas');
+        const ctx = canvas.getContext('2d');
+        const toolRed = document.getElementById('tool-red');
+        const toolBlue = document.getElementById('tool-blue');
+        const resetBtn = document.getElementById('reset-btn');
+        const dataCountDisplay = document.getElementById('data-count');
+        const equationDisplay = document.getElementById('equation-display');
+
+        // 상태 변수
+        let points = []; 
+        let currentClass = 1; // 1: Red(A), 0: Blue(B)
+        
+        // 회귀 가중치 초기화 (임의의 작은 값)
+        let w1 = Math.random() * 0.2 - 0.1;
+        let w2 = Math.random() * 0.2 - 0.1;
+        let b = 0;
+
+        const learningRate = 0.5; // 실시간 인터랙션을 위한 빠른 학습률
+        const lambda = 0.005; // L2 정규화 (가중치 폭주 방지)
+
+        let canvasWidth = 0;
+        let canvasHeight = 0;
+
+        function resizeCanvas() {
+            const rect = canvas.parentElement.getBoundingClientRect();
+            canvasWidth = rect.width;
+            canvasHeight = rect.height;
+
+            const dpr = window.devicePixelRatio || 1;
+            canvas.width = canvasWidth * dpr;
+            canvas.height = canvasHeight * dpr;
+            
+            ctx.scale(dpr, dpr);
+        }
+
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        // 좌표계 변환 함수
+        function toMath(sx, sy) {
+            return { x: sx / canvasWidth, y: 1.0 - (sy / canvasHeight) };
+        }
+
+        function toScreen(mx, my) {
+            return { x: mx * canvasWidth, y: (1.0 - my) * canvasHeight };
+        }
+
+        toolRed.addEventListener('click', () => {
+            currentClass = 1;
+            toolRed.classList.add('active-red');
+            toolRed.classList.remove('text-slate-600', 'border-slate-200');
+            toolBlue.classList.remove('active-blue');
+            toolBlue.classList.add('text-slate-600', 'border-slate-200');
+        });
+
+        toolBlue.addEventListener('click', () => {
+            currentClass = 0;
+            toolBlue.classList.add('active-blue');
+            toolBlue.classList.remove('text-slate-600', 'border-slate-200');
+            toolRed.classList.remove('active-red');
+            toolRed.classList.add('text-slate-600', 'border-slate-200');
+        });
+
+        resetBtn.addEventListener('click', () => {
+            points = [];
+            w1 = Math.random() * 0.2 - 0.1;
+            w2 = Math.random() * 0.2 - 0.1;
+            b = 0;
+            dataCountDisplay.innerText = `데이터: 0개`;
+            equationDisplay.innerText = `데이터를 2개 이상 입력해주세요.`;
+            equationDisplay.classList.remove('text-slate-800', 'font-bold');
+            equationDisplay.classList.add('text-slate-400');
+        });
+
+        canvas.addEventListener('pointerdown', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const sx = e.clientX - rect.left;
+            const sy = e.clientY - rect.top;
+
+            const mathPt = toMath(sx, sy);
+            
+            points.push({
+                x: mathPt.x,
+                y: mathPt.y,
+                label: currentClass,
+                animProgress: 0
+            });
+            
+            dataCountDisplay.innerText = `데이터: ${points.length}개`;
+        });
+
+        function sigmoid(z) {
+            return 1 / (1 + Math.exp(-z));
+        }
+
+        function trainStep() {
+            if (points.length < 2) return; // 점이 너무 적으면 학습하지 않음
+
+            // 매 프레임 다중 반복으로 실시간성 확보
+            for (let epoch = 0; epoch < 15; epoch++) {
+                let dw1 = 0, dw2 = 0, db = 0;
+                
+                for (let i = 0; i < points.length; i++) {
+                    let p = points[i];
+                    let z = w1 * p.x + w2 * p.y + b;
+                    let pred = sigmoid(z);
+                    let error = pred - p.label; 
+
+                    dw1 += error * p.x;
+                    dw2 += error * p.y;
+                    db += error;
+                }
+                
+                let n = points.length;
+                dw1 /= n;
+                dw2 /= n;
+                db /= n;
+
+                // 정규화 적용
+                dw1 += lambda * w1;
+                dw2 += lambda * w2;
+
+                w1 -= learningRate * dw1;
+                w2 -= learningRate * dw2;
+                b -= learningRate * db;
+            }
+        }
+
+        function drawBackground() {
+            ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+
+            if (points.length < 2) return;
+
+            let mathP1, mathP2;
+            
+            // 선의 절편 계산 (화면을 가로지르도록 연장)
+            if (Math.abs(w2) > Math.abs(w1)) {
+                mathP1 = { x: -10, y: (-w1 * -10 - b) / w2 };
+                mathP2 = { x: 10, y: (-w1 * 10 - b) / w2 };
+            } else {
+                mathP1 = { y: -10, x: (-w2 * -10 - b) / w1 };
+                mathP2 = { y: 10, x: (-w2 * 10 - b) / w1 };
+            }
+
+            const sp1 = toScreen(mathP1.x, mathP1.y);
+            const sp2 = toScreen(mathP2.x, mathP2.y);
+
+            let nx = w1;
+            let ny = -w2; // Y 좌표계 반전
+            const len = Math.sqrt(nx * nx + ny * ny);
+            if (len > 0) { nx /= len; ny /= len; }
+
+            const dist = 3000; 
+
+            // 파란색 영역 (Class 0)
+            ctx.fillStyle = 'rgba(59, 130, 246, 0.1)';
+            ctx.beginPath();
+            ctx.moveTo(sp1.x, sp1.y);
+            ctx.lineTo(sp2.x, sp2.y);
+            ctx.lineTo(sp2.x - nx * dist, sp2.y - ny * dist);
+            ctx.lineTo(sp1.x - nx * dist, sp1.y - ny * dist);
+            ctx.fill();
+
+            // 빨간색 영역 (Class 1)
+            ctx.fillStyle = 'rgba(239, 68, 68, 0.1)';
+            ctx.beginPath();
+            ctx.moveTo(sp1.x, sp1.y);
+            ctx.lineTo(sp2.x, sp2.y);
+            ctx.lineTo(sp2.x + nx * dist, sp2.y + ny * dist);
+            ctx.lineTo(sp1.x + nx * dist, sp1.y + ny * dist);
+            ctx.fill();
+
+            // 결정 경계선
+            ctx.beginPath();
+            ctx.moveTo(sp1.x, sp1.y);
+            ctx.lineTo(sp2.x, sp2.y);
+            ctx.strokeStyle = '#64748b'; // slate-500
+            ctx.lineWidth = 3;
+            ctx.stroke();
+        }
+
+        function drawPoints() {
+            for (let i = 0; i < points.length; i++) {
+                let pt = points[i];
+                const sp = toScreen(pt.x, pt.y);
+                
+                if (pt.animProgress < 1) {
+                    pt.animProgress += 0.15;
+                    if (pt.animProgress > 1) pt.animProgress = 1;
+                }
+                
+                const scale = Math.sin(pt.animProgress * Math.PI / 2) + Math.sin(pt.animProgress * Math.PI) * 0.3;
+                const size = 10 * scale; // 모바일에서 터치하기 쉽도록 약간 크게
+
+                ctx.lineWidth = 2;
+
+                if (pt.label === 1) {
+                    ctx.fillStyle = '#ef4444';
+                    ctx.strokeStyle = '#ffffff';
+                    ctx.beginPath();
+                    ctx.arc(sp.x, sp.y, Math.max(0, size), 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.stroke();
+                } else {
+                    ctx.fillStyle = '#3b82f6';
+                    ctx.strokeStyle = '#ffffff';
+                    ctx.beginPath();
+                    ctx.rect(sp.x - size, sp.y - size, size * 2, size * 2);
+                    ctx.fill();
+                    ctx.stroke();
+                }
+            }
+        }
+
+        function updateUI() {
+            if (points.length >= 2) {
+                const fw1 = w1.toFixed(2);
+                const fw2 = w2.toFixed(2);
+                
+                const signW2 = w2 >= 0 ? '+' : '-';
+                const signB = b >= 0 ? '+' : '-';
+                
+                equationDisplay.innerHTML = `<span class="text-red-500 font-bold">${fw1}</span><span class="text-slate-800">x</span> ${signW2} <span class="text-blue-500 font-bold">${Math.abs(w2).toFixed(2)}</span><span class="text-slate-800">y</span> ${signB} <span class="text-emerald-600 font-bold">${Math.abs(b).toFixed(2)}</span> = 0`;
+                equationDisplay.classList.remove('text-slate-400');
+                equationDisplay.classList.add('text-slate-800', 'font-bold');
+            }
+        }
+
+        function gameLoop() {
+            trainStep();
+            drawBackground();
+            drawPoints();
+            updateUI();
+            
+            requestAnimationFrame(gameLoop);
+        }
+
+        window.onload = function() {
+            gameLoop();
+        };
+
+    </script>
+</body>
+</html>
